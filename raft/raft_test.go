@@ -1925,6 +1925,80 @@ func TestNonPromotableVoterWithCheckQuorum(t *testing.T) {
 	}
 }
 
+// TestFollowerWithDelayedLeaderHeartbeat tests that isolated
+// follower with slow network from leader starts its campaign,
+// and response to later heartbeat from leader triggers leader
+// stepping down.
+func TestFollowerWithDelayedLeaderHeartbeat(t *testing.T) {
+	a := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+	b := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+	c := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+
+	a.checkQuorum = true
+	b.checkQuorum = true
+	c.checkQuorum = true
+
+	nt := newNetwork(a, b, c)
+	setRandomizedElectionTimeout(a, a.electionTimeout+1)
+	setRandomizedElectionTimeout(b, b.electionTimeout+2)
+
+	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgHup})
+	if a.state != StateLeader {
+		t.Errorf("state = %s, want %s", a.state, StateLeader)
+	}
+	if b.state != StateFollower {
+		t.Errorf("state = %s, want %s", b.state, StateFollower)
+	}
+	if c.state != StateFollower {
+		t.Errorf("state = %s, want %s", c.state, StateFollower)
+	}
+
+	// simulate etcd server follower "c" restart;
+	// "advanceTicksForElection" with "tickElection", to expedite
+	// campaign with larger election timeouts (multi-datacenter)
+	for i := 0; i < c.randomizedElectionTimeout-1; i++ {
+		c.tick()
+	}
+
+	// ideally, before last election tick elapses,
+	// the follower "c" receives "pb.MsgApp" or "pb.MsgHeartbeat"
+	// from leader "a", and then resets its "electionElapsed"
+	// however, last tick may elapse first before receiving any
+	// message from leader, thus triggering campaign
+	c.tick()
+
+	if a.state != StateLeader {
+		t.Errorf("state = %s, want %s", a.state, StateLeader)
+	}
+	if c.state != StateCandidate {
+		t.Errorf("state = %s, want %s", c.state, StateCandidate)
+	}
+
+	// now, vote requests with term 2 in c's mailbox
+	if a.Term+1 != c.Term {
+		t.Errorf("expected term increase in c; got a.Term %d + 1 != c.Term %d", a.Term, c.Term)
+	}
+	for _, m := range c.msgs {
+		if m.Type != pb.MsgVote {
+			t.Errorf("expected message type 'MsgVote', got %s", m.Type)
+		}
+	}
+
+	// before transporting vote requests to its peers,
+	// candidate c receives "pb.MsgHeartbeat" from leader with lower term
+	// (e.g. due to delayed network from leader)
+	nt.send(pb.Message{From: 1, To: 3, Term: a.Term, Type: pb.MsgHeartbeat})
+
+	// candidate c responds with "pb.MsgAppResp" of higher term
+	// then leader reverts back to follower
+	if a.state != StateFollower {
+		t.Errorf("state = %s, want %s", a.state, StateFollower)
+	}
+	if c.state != StateCandidate {
+		t.Errorf("state = %s, want %s", c.state, StateCandidate)
+	}
+}
+
 func TestReadOnlyOptionSafe(t *testing.T) {
 	a := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 	b := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
