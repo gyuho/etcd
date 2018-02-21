@@ -401,7 +401,11 @@ func (r *raft) learnerNodes() []uint64 {
 // send persists state to stable storage and then sends to its mailbox.
 func (r *raft) send(m pb.Message) {
 	m.From = r.id
-	if m.Type == pb.MsgVote || m.Type == pb.MsgVoteResp || m.Type == pb.MsgPreVote || m.Type == pb.MsgPreVoteResp {
+	if m.Type == pb.MsgVote ||
+		m.Type == pb.MsgVoteResp ||
+		m.Type == pb.MsgPreVote ||
+		m.Type == pb.MsgPreVoteResp ||
+		m.Type == pb.MsgReachable {
 		if m.Term == 0 {
 			// All {pre-,}campaign messages need to have the term set when
 			// sending.
@@ -415,6 +419,8 @@ func (r *raft) send(m pb.Message) {
 			// - MsgPreVoteResp: m.Term is the term received in the original
 			//   MsgPreVote if the pre-vote was granted, non-zero for the
 			//   same reasons MsgPreVote is
+			// - MsgReachable: m.Term is the term received in the original
+			//   MsgHeartbeat or MsgApp from leader
 			panic(fmt.Sprintf("term should be set when sending %s", m.Type))
 		}
 	} else {
@@ -817,9 +823,11 @@ func (r *raft) Step(m pb.Message) error {
 			// nodes that have been removed from the cluster's configuration: a
 			// removed node will send MsgVotes (or MsgPreVotes) which will be ignored,
 			// but it will not receive MsgApp or MsgHeartbeat, so it will not create
-			// disruptive term increases
+			// disruptive term increases. That is, when checkQuorum is true, follower
+			// needs a way to tell the leader ...
+			//
 			// The above comments also true for Pre-Vote
-			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp})
+			r.send(pb.Message{To: m.From, Term: m.Term, Type: pb.MsgReachable})
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
