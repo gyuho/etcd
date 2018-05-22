@@ -100,6 +100,12 @@
   revision = "4201258b820c74ac8e6922fc9e6b52f71fe46f8d"
 
 [[projects]]
+  name = "github.com/grpc-ecosystem/go-grpc-middleware"
+  packages = ["util/backoffutils"]
+  revision = "c250d6563d4d4c20252cd865923440e829844f4e"
+  version = "v1.0.0"
+
+[[projects]]
   name = "github.com/grpc-ecosystem/go-grpc-prometheus"
   packages = ["."]
   revision = "0dafe0d496ea71181bf2dd039e7e3f44b6bd11a7"
@@ -333,7 +339,6 @@
     "peer",
     "resolver",
     "resolver/dns",
-    "resolver/manual",
     "resolver/passthrough",
     "stats",
     "status",
@@ -357,6 +362,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "9b6e97c6524385aecaa477af059f4f6555b3609d4a283ecf27ac2ad4fbe08f06"
+  inputs-digest = "40c72e54abdb7d6c044f2f5fabb8fc7ac2eadcab047cc22b28d26b7b145b5e1b"
   solver-name = "gps-cdcl"
   solver-version = 1
