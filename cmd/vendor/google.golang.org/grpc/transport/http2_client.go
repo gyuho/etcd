@@ -20,6 +20,7 @@ package transport
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -649,6 +650,7 @@ func (t *http2Client) Write(s *Stream, hdr []byte, data []byte, opts *Options) e
 
 	if hdr == nil && data == nil && opts.Last {
 		// stream.CloseSend uses this to send an empty frame with endStream=True
+		fmt.Println("end=True t.controlBuf.put")
 		t.controlBuf.put(&dataFrame{streamID: s.id, endStream: true, f: func() {}})
 		return nil
 	}
@@ -874,6 +876,7 @@ func (t *http2Client) handleData(f *http2.DataFrame) {
 			s.mu.Unlock()
 			return
 		}
+		fmt.Println("server closed the stream without sending trailers")
 		s.finish(status.New(codes.Internal, "server closed the stream without sending trailers"))
 		s.mu.Unlock()
 		s.write(recvMsg{err: io.EOF})
@@ -1265,6 +1268,7 @@ func (t *http2Client) keepalive() {
 	for {
 		select {
 		case <-timer.C:
+			fmt.Println("[client keepalive] <-timer.C")
 			if atomic.CompareAndSwapUint32(&t.activity, 1, 0) {
 				timer.Reset(t.kp.Time)
 				continue
@@ -1285,6 +1289,7 @@ func (t *http2Client) keepalive() {
 			} else {
 				t.mu.Unlock()
 				// Send ping.
+				fmt.Println("[keepalive] client sending ping!!")
 				t.controlBuf.put(p)
 			}
 
@@ -1296,7 +1301,9 @@ func (t *http2Client) keepalive() {
 					timer.Reset(t.kp.Time)
 					continue
 				}
+				fmt.Println("client keepalive]]]]]]]] t.Close() 1")
 				t.Close()
+				fmt.Println("client keepalive]]]]]]]] t.Close() 2")
 				return
 			case <-t.ctx.Done():
 				if !timer.Stop() {

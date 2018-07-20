@@ -19,6 +19,7 @@
 package grpc
 
 import (
+	"fmt"
 	"sync"
 
 	"golang.org/x/net/context"
@@ -88,7 +89,6 @@ type balancerWrapper struct {
 // connections accordingly.
 func (bw *balancerWrapper) lbWatcher() {
 	<-bw.startCh
-	grpclog.Infof("balancerWrapper: is pickfirst: %v\n", bw.pickfirst)
 	notifyCh := bw.balancer.Notify()
 	if notifyCh == nil {
 		// There's no resolver in the balancer. Connect directly.
@@ -113,7 +113,8 @@ func (bw *balancerWrapper) lbWatcher() {
 	}
 
 	for addrs := range notifyCh {
-		grpclog.Infof("balancerWrapper: got update addr from Notify: %v\n", addrs)
+		println()
+		fmt.Printf("[DEBUG] lbWatcher notifyCh received addrs %v from etcd\n", addrs)
 		if bw.pickfirst {
 			var (
 				oldA  resolver.Address
@@ -190,19 +191,23 @@ func (bw *balancerWrapper) lbWatcher() {
 					add = append(add, a)
 				}
 			}
+			mm := make(map[balancer.SubConn]resolver.Address)
 			for a, c := range bw.conns {
 				if _, ok := resAddrs[a]; !ok {
 					del = append(del, c)
+					mm[c] = a
 					delete(bw.conns, a)
 					// Keep the state of this sc in bw.connSt until its state becomes Shutdown.
 				}
 			}
 			bw.mu.Unlock()
 			for _, a := range add {
+				println()
+				fmt.Printf("[DEBUG] 1; bw.cc.NewSubConn on %v\n", a)
 				sc, err := bw.cc.NewSubConn([]resolver.Address{a}, balancer.NewSubConnOptions{})
-				if err != nil {
-					grpclog.Warningf("Error creating connection to %v. Err: %v", a, err)
-				} else {
+				fmt.Printf("[DEBUG] 2; bw.cc.NewSubConn on %v (%p %v)\n", a, sc, err)
+				println()
+				if err == nil {
 					bw.mu.Lock()
 					bw.conns[a] = sc
 					bw.connSt[sc] = &scState{
@@ -210,18 +215,22 @@ func (bw *balancerWrapper) lbWatcher() {
 						s:    connectivity.Idle,
 					}
 					bw.mu.Unlock()
+					fmt.Printf("[DEBUG] 1; Connect on %v with connectivity.Idle\n", a)
 					sc.Connect()
+					fmt.Printf("[DEBUG] 2; Connect on %v with connectivity.Idle\n", a)
 				}
 			}
 			for _, c := range del {
+				fmt.Printf("[DEBUG] 1; RemoveSubConn on %v\n", mm[c])
 				bw.cc.RemoveSubConn(c)
+				fmt.Printf("[DEBUG] 2; RemoveSubConn on %v\n", mm[c])
 			}
 		}
 	}
 }
 
 func (bw *balancerWrapper) HandleSubConnStateChange(sc balancer.SubConn, s connectivity.State) {
-	grpclog.Infof("balancerWrapper: handle subconn state change: %p, %v", sc, s)
+	fmt.Printf("[DEBUG] 1 HandleSubConnStateChange: handle subconn state change: %p, %v\n", sc, s)
 	bw.mu.Lock()
 	defer bw.mu.Unlock()
 	scSt, ok := bw.connSt[sc]
@@ -233,12 +242,22 @@ func (bw *balancerWrapper) HandleSubConnStateChange(sc balancer.SubConn, s conne
 	}
 	oldS := scSt.s
 	scSt.s = s
+	fmt.Printf("[DEBUG] 2 HandleSubConnStateChange: handle subconn state change: %p from %v to %v\n", sc, oldS, s)
+
 	if oldS != connectivity.Ready && s == connectivity.Ready {
+		fmt.Println("[DEBUG] 1 HandleSubConnStateChange bw.balancer.Up(scSt.addr)", scSt.addr)
 		scSt.down = bw.balancer.Up(scSt.addr)
+		fmt.Println("[DEBUG] 2 HandleSubConnStateChange bw.balancer.Up(scSt.addr)", scSt.addr)
+
 	} else if oldS == connectivity.Ready && s != connectivity.Ready {
+		println()
+		fmt.Printf("[DEBUG-IMPORTANT] 1 HandleSubConnStateChange scSt.down(errConnClosing) from %v to %v on %v\n", oldS, s, scSt.addr)
 		if scSt.down != nil {
+			fmt.Println("[DEBUG-IMPORTANT] 2 HandleSubConnStateChange calling scSt.down(errConnClosing)", scSt.addr)
 			scSt.down(errConnClosing)
+			fmt.Println("[DEBUG-IMPORTANT] 3 HandleSubConnStateChange called scSt.down(errConnClosing)", scSt.addr)
 		}
+		println()
 	}
 	sa := bw.csEvltr.recordTransition(oldS, s)
 	if bw.state != sa {
@@ -247,7 +266,9 @@ func (bw *balancerWrapper) HandleSubConnStateChange(sc balancer.SubConn, s conne
 	bw.cc.UpdateBalancerState(bw.state, bw)
 	if s == connectivity.Shutdown {
 		// Remove state for this sc.
+		fmt.Println("[DEBUG] 1 HandleSubConnStateChange delete(bw.connSt, sc)")
 		delete(bw.connSt, sc)
+		fmt.Println("[DEBUG] 2 HandleSubConnStateChange delete(bw.connSt, sc)")
 	}
 	return
 }

@@ -17,6 +17,7 @@ package clientv3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -46,6 +47,13 @@ const (
 	notifyReset notifyMsg = iota
 	notifyNext
 )
+
+func (m notifyMsg) String() string {
+	if m == notifyReset {
+		return "notifyReset"
+	}
+	return "notifyNext"
+}
 
 // healthBalancer does the bare minimum to expose multiple eps
 // to the grpc reconnection code path
@@ -158,26 +166,26 @@ func (b *healthBalancer) pinned() string {
 
 func (b *healthBalancer) hostPortError(hostPort string, err error) {
 	if b.endpoint(hostPort) == "" {
-		logger.Lvl(4).Infof("clientv3/balancer: %q is stale (skip marking as unhealthy on %q)", hostPort, err.Error())
+		fmt.Printf("clientv3/balancer: %q is stale (skip marking as unhealthy on %q)\n", hostPort, err.Error())
 		return
 	}
 
 	b.unhealthyMu.Lock()
 	b.unhealthyHostPorts[hostPort] = time.Now()
 	b.unhealthyMu.Unlock()
-	logger.Lvl(4).Infof("clientv3/balancer: %q is marked unhealthy (%q)", hostPort, err.Error())
+	fmt.Printf("clientv3/balancer: %q is marked unhealthy (%q)\n", hostPort, err.Error())
 }
 
 func (b *healthBalancer) removeUnhealthy(hostPort, msg string) {
 	if b.endpoint(hostPort) == "" {
-		logger.Lvl(4).Infof("clientv3/balancer: %q was not in unhealthy (%q)", hostPort, msg)
+		fmt.Printf("clientv3/balancer: %q was not in unhealthy (%q)\n", hostPort, msg)
 		return
 	}
 
 	b.unhealthyMu.Lock()
 	delete(b.unhealthyHostPorts, hostPort)
 	b.unhealthyMu.Unlock()
-	logger.Lvl(4).Infof("clientv3/balancer: %q is removed from unhealthy (%q)", hostPort, msg)
+	fmt.Printf("clientv3/balancer: %q is removed from unhealthy (%q)\n", hostPort, msg)
 }
 
 func (b *healthBalancer) countUnhealthy() (count int) {
@@ -199,7 +207,7 @@ func (b *healthBalancer) cleanupUnhealthy() {
 	for k, v := range b.unhealthyHostPorts {
 		if time.Since(v) > b.healthCheckTimeout {
 			delete(b.unhealthyHostPorts, k)
-			logger.Lvl(4).Infof("clientv3/balancer: removed %q from unhealthy after %v", k, b.healthCheckTimeout)
+			fmt.Printf("clientv3/balancer: removed %q from unhealthy after %v\n", k, b.healthCheckTimeout)
 		}
 	}
 	b.unhealthyMu.Unlock()
@@ -349,9 +357,11 @@ func (b *healthBalancer) updateNotifyLoop() {
 }
 
 func (b *healthBalancer) notifyAddrs(msg notifyMsg) {
+	fmt.Println("[clientv3] notifyAddrs 1 with", msg.String())
 	if msg == notifyNext {
 		select {
 		case b.notifyCh <- []grpc.Address{}:
+			fmt.Println("[clientv3] notifyAddrs 2: <- []grpc.Address{}")
 		case <-b.stopc:
 			return
 		}
@@ -359,6 +369,7 @@ func (b *healthBalancer) notifyAddrs(msg notifyMsg) {
 	b.mu.RLock()
 	pinAddr := b.pinAddr
 	downc := b.downc
+	fmt.Println("[clientv3] notifyAddrs 3", pinAddr)
 	b.mu.RUnlock()
 	addrs, hostPorts := b.liveAddrs()
 
@@ -368,8 +379,10 @@ func (b *healthBalancer) notifyAddrs(msg notifyMsg) {
 		waitDown = !ok
 	}
 
+	fmt.Println("[clientv3] notifyAddrs b.notifyCh <- addrs 1; pinAddr:", pinAddr, "/ addrs:", addrs, "/ waitDown:", waitDown)
 	select {
 	case b.notifyCh <- addrs:
+		fmt.Println("[clientv3] notifyAddrs b.notifyCh <- addrs 2; pinAddr:", pinAddr, "/ addrs:", addrs, "/ waitDown:", waitDown)
 		if waitDown {
 			select {
 			case <-downc:
@@ -381,7 +394,9 @@ func (b *healthBalancer) notifyAddrs(msg notifyMsg) {
 }
 
 func (b *healthBalancer) Up(addr grpc.Address) func(error) {
+	fmt.Println("[clientv3] Up 1:", addr)
 	if !b.mayPin(addr) {
+		fmt.Println("[clientv3] Up 2:", addr)
 		return func(err error) {}
 	}
 
@@ -402,7 +417,7 @@ func (b *healthBalancer) Up(addr grpc.Address) func(error) {
 	}
 
 	if b.pinAddr != "" {
-		logger.Lvl(4).Infof("clientv3/balancer: %q is up but not pinned (already pinned %q)", addr.Addr, b.pinAddr)
+		fmt.Printf("clientv3/balancer: %q is up but not pinned (already pinned %q)\n", addr.Addr, b.pinAddr)
 		return func(err error) {}
 	}
 
@@ -410,7 +425,7 @@ func (b *healthBalancer) Up(addr grpc.Address) func(error) {
 	close(b.upc)
 	b.downc = make(chan struct{})
 	b.pinAddr = addr.Addr
-	logger.Lvl(4).Infof("clientv3/balancer: pin %q", addr.Addr)
+	fmt.Printf("clientv3/balancer: pin %q\n", addr.Addr)
 
 	// notify client that a connection is up
 	b.readyOnce.Do(func() { close(b.readyc) })
@@ -420,6 +435,7 @@ func (b *healthBalancer) Up(addr grpc.Address) func(error) {
 		// timeout will induce a network I/O error, and retrying until success;
 		// finding healthy endpoint on retry could take several timeouts and redials.
 		// To avoid wasting retries, gray-list unhealthy endpoints.
+		fmt.Println("[clientv3] Up error:", addr.Addr, "/", err)
 		b.hostPortError(addr.Addr, err)
 
 		b.mu.Lock()
@@ -427,7 +443,7 @@ func (b *healthBalancer) Up(addr grpc.Address) func(error) {
 		close(b.downc)
 		b.pinAddr = ""
 		b.mu.Unlock()
-		logger.Lvl(4).Infof("clientv3/balancer: unpin %q (%q)", addr.Addr, err.Error())
+		fmt.Printf("clientv3/balancer: unpin %q (%q)\n", addr.Addr, err.Error())
 	}
 }
 
@@ -454,7 +470,7 @@ func (b *healthBalancer) mayPin(addr grpc.Address) bool {
 	//   3. grpc-healthcheck still SERVING, thus retry to pin
 	// instead, return before grpc-healthcheck if failed within healthcheck timeout
 	if elapsed := time.Since(failedTime); elapsed < b.healthCheckTimeout {
-		logger.Lvl(4).Infof("clientv3/balancer: %q is up but not pinned (failed %v ago, require minimum %v after failure)", addr.Addr, elapsed, b.healthCheckTimeout)
+		fmt.Printf("clientv3/balancer: %q is up but not pinned (failed %v ago, require minimum %v after failure)\n", addr.Addr, elapsed, b.healthCheckTimeout)
 		return false
 	}
 

@@ -722,7 +722,7 @@ func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
 	})
 	if t.stats != nil {
 		outHeader := &stats.OutHeader{
-		//WireLength: // TODO(mmukhi): Revisit this later, if needed.
+			//WireLength: // TODO(mmukhi): Revisit this later, if needed.
 		}
 		t.stats.HandleRPC(s.Context(), outHeader)
 	}
@@ -936,14 +936,18 @@ func (t *http2Server) keepalive() {
 			if val <= 0 {
 				// The connection has been idle for a duration of keepalive.MaxConnectionIdle or more.
 				// Gracefully close the connection.
+				fmt.Println("1 server drain!", t.localAddr, t.remoteAddr)
 				t.drain(http2.ErrCodeNo, []byte{})
+				fmt.Println("2 server drain!", t.localAddr, t.remoteAddr)
 				// Reseting the timer so that the clean-up doesn't deadlock.
 				maxIdle.Reset(infinity)
 				return
 			}
 			maxIdle.Reset(val)
 		case <-maxAge.C:
+			fmt.Println("3 server drain!", t.localAddr, t.remoteAddr)
 			t.drain(http2.ErrCodeNo, []byte{})
+			fmt.Println("4 server drain!", t.localAddr, t.remoteAddr)
 			maxAge.Reset(t.kp.MaxConnectionAgeGrace)
 			select {
 			case <-maxAge.C:
@@ -1035,6 +1039,7 @@ func (t *http2Server) itemHandler(i item) error {
 	case *resetStream:
 		return t.framer.fr.WriteRSTStream(i.streamID, i.code)
 	case *goAway:
+		fmt.Println("*goAway in server")
 		t.mu.Lock()
 		if t.state == closing {
 			t.mu.Unlock()
@@ -1083,8 +1088,10 @@ func (t *http2Server) itemHandler(i item) error {
 		}()
 		return nil
 	case *flushIO:
+		fmt.Println("*flushIO in server")
 		return t.framer.writer.Flush()
 	case *ping:
+		fmt.Println("*ping in server")
 		if !i.ack {
 			t.bdpEst.timesnap(i.data)
 		}
@@ -1161,6 +1168,7 @@ func (t *http2Server) drain(code http2.ErrCode, debugData []byte) {
 	if t.drainChan != nil {
 		return
 	}
+	fmt.Println("drain in server", code, string(debugData))
 	t.drainChan = make(chan struct{})
 	t.controlBuf.put(&goAway{code: code, debugData: debugData, headsUp: true})
 }

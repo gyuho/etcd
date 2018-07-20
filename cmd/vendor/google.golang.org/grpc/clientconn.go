@@ -661,6 +661,7 @@ func (cc *ClientConn) removeAddrConn(ac *addrConn, err error) {
 // This was part of resetAddrConn, keep it here to make the diff look clean.
 func (ac *addrConn) connect(block bool) error {
 	ac.mu.Lock()
+	fmt.Println("[DEBUG] client conn connect with block", block, "/ state", ac.state)
 	if ac.state == connectivity.Shutdown {
 		ac.mu.Unlock()
 		return errConnClosing
@@ -669,6 +670,7 @@ func (ac *addrConn) connect(block bool) error {
 		ac.mu.Unlock()
 		return nil
 	}
+	fmt.Println("[DEBUG] client conn connecting...")
 	ac.state = connectivity.Connecting
 	if ac.cc.balancerWrapper != nil {
 		ac.cc.balancerWrapper.handleSubConnStateChange(ac.acbw, ac.state)
@@ -692,14 +694,20 @@ func (ac *addrConn) connect(block bool) error {
 	} else {
 		// Start a goroutine connecting to the server asynchronously.
 		go func() {
+			fmt.Println("connect calling resetTransport")
 			if err := ac.resetTransport(); err != nil {
 				grpclog.Warningf("Failed to dial %s: %v; please retry.", ac.addrs[0].Addr, err)
+				fmt.Println("[DEBUG] resetTransport failed on", ac.addrs, "with", err, err != errConnClosing)
 				if err != errConnClosing {
+					fmt.Println("[DEBUG] 1 tearDown", err)
 					// Keep this ac in cc.conns, to get the reason it's torn down.
 					ac.tearDown(err)
+					fmt.Println("[DEBUG] 2 tearDown", err)
 				}
+				println()
 				return
 			}
+			fmt.Println("connect calling transportMonitor")
 			ac.transportMonitor()
 		}()
 	}
@@ -873,6 +881,7 @@ func (ac *addrConn) errorf(format string, a ...interface{}) {
 // TODO(bar) make sure all state transitions are valid.
 func (ac *addrConn) resetTransport() error {
 	ac.mu.Lock()
+	fmt.Println("[DEBUG] 1 resetTransport", ac.state)
 	if ac.state == connectivity.Shutdown {
 		ac.mu.Unlock()
 		return errConnClosing
@@ -886,6 +895,7 @@ func (ac *addrConn) resetTransport() error {
 	ac.mu.Unlock()
 	ac.cc.mu.RLock()
 	ac.dopts.copts.KeepaliveParams = ac.cc.mkp
+	fmt.Println("KeepaliveParams:", ac.dopts.copts.KeepaliveParams)
 	ac.cc.mu.RUnlock()
 	for retries := 0; ; retries++ {
 		sleepTime := ac.dopts.bs.backoff(retries)
@@ -900,6 +910,7 @@ func (ac *addrConn) resetTransport() error {
 			return errConnClosing
 		}
 		ac.printf("connecting")
+		fmt.Println("[DEBUG] 2 resetTransport connecting", ac.state, ac.addrs)
 		if ac.state != connectivity.Connecting {
 			ac.state = connectivity.Connecting
 			// TODO(bar) remove condition once we always have a balancer.
@@ -926,7 +937,9 @@ func (ac *addrConn) resetTransport() error {
 				Addr:     addr.Addr,
 				Metadata: addr.Metadata,
 			}
+			fmt.Println("[DEBUG] 3 resetTransport NewClientTransport", ac.state, addr)
 			newTransport, err := transport.NewClientTransport(ac.cc.ctx, sinfo, copts, timeout)
+			fmt.Println("[DEBUG] 4 resetTransport NewClientTransport", ac.state, addr, err)
 			if err != nil {
 				if e, ok := err.(transport.ConnectionError); ok && !e.Temporary() {
 					ac.mu.Lock()
@@ -1035,6 +1048,7 @@ func (ac *addrConn) transportMonitor() {
 		}
 		ac.curAddr = resolver.Address{}
 		ac.mu.Unlock()
+		fmt.Println("transportMonitor calling resetTransport")
 		if err := ac.resetTransport(); err != nil {
 			ac.mu.Lock()
 			ac.printf("transport exiting: %v", err)
