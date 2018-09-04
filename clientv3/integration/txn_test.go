@@ -17,6 +17,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -170,24 +171,51 @@ func TestTxnCompareRange(t *testing.T) {
 	defer clus.Terminate(t)
 
 	kv := clus.Client(0)
-	fooResp, err := kv.Put(context.TODO(), "foo/", "bar")
+	fooResp, err := kv.Put(context.TODO(), "foo", "bar")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = kv.Put(context.TODO(), "foo/a", "baz"); err != nil {
-		t.Fatal(err)
+	_ = fooResp
+
+	var compactTime int64
+	var rev int64
+	for range []int{0, 1} {
+		compactTime, rev, err = compact(context.Background(), kv, compactTime, rev)
+		fmt.Println(compactTime, rev, err)
+		println()
+		compactTime, rev = 0, 0
 	}
-	tresp, terr := kv.Txn(context.TODO()).If(
-		clientv3.Compare(
-			clientv3.CreateRevision("foo/"), "=", fooResp.Header.Revision).
-			WithPrefix(),
+}
+
+func compact(ctx context.Context, client *clientv3.Client, t, rev int64) (int64, int64, error) {
+	resp, err := client.KV.Txn(ctx).If(
+		clientv3.Compare(clientv3.Version("compactRevKey"), "=", t),
+	).Then(
+		clientv3.OpPut("compactRevKey", strconv.FormatInt(rev, 10)), // Expect side effect: increment Version
+	).Else(
+		clientv3.OpGet("compactRevKey"),
 	).Commit()
-	if terr != nil {
-		t.Fatal(terr)
+	if err != nil {
+		return t, rev, err
 	}
-	if tresp.Succeeded {
-		t.Fatal("expected prefix compare to false, got compares as true")
+
+	curRev := resp.Header.Revision
+	fmt.Println("resp.Succeeded:", resp.Succeeded)
+	if !resp.Succeeded {
+		curTime := resp.Responses[0].GetResponseRange().Kvs[0].Version
+		return curTime, curRev, nil
 	}
+	curTime := t + 1
+
+	if rev == 0 {
+		// We don't compact on bootstrap.
+		return curTime, curRev, nil
+	}
+	if _, err = client.Compact(ctx, rev); err != nil {
+		return curTime, curRev, err
+	}
+	fmt.Printf("etcd: compacted rev (%d), endpoints (%v)\n", rev, client.Endpoints())
+	return curTime, curRev, nil
 }
 
 func TestTxnNested(t *testing.T) {

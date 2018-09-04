@@ -357,6 +357,7 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 	}
 
 	txnResp, _ := newTxnResp(rt, txnPath)
+	fmt.Println("txnPath:", txnPath)
 
 	// When executing mutable txn ops, etcd must hold the txn lock so
 	// readers do not see any intermediate results. Since writes are
@@ -374,6 +375,9 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 	txn.End()
 
 	txnResp.Header.Revision = rev
+	fmt.Println("txnResp.Header.Revision:", txnResp.Header.Revision)
+	fmt.Println("resp.Responses:", len(txnResp.Responses))
+	fmt.Println("resp.Responses.Kvs:", txnResp.Responses[0].GetResponseRange())
 	return txnResp, nil
 }
 
