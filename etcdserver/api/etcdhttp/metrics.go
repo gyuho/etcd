@@ -94,6 +94,7 @@ func checkHealth(srv etcdserver.ServerV2) Health {
 		_, err := srv.Do(ctx, etcdserverpb.Request{Method: "QGET"})
 		cancel()
 		if err != nil {
+			// log?
 			h.Health = "false"
 		}
 	}
