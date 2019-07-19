@@ -71,6 +71,19 @@ func newTransportCredential(cfg *tls.Config) *transportCredential {
 }
 
 func (tc *transportCredential) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (net.Conn, grpccredentials.AuthInfo, error) {
+	target := rawConn.RemoteAddr().String()
+	if authority != target {
+		// When user dials with "grpc.WithDialer", "grpc.DialContext" "cc.parsedTarget"
+		// update only happens once. This is problematic, because when TLS is enabled,
+		// retries happen through "grpc.WithDialer" with static "cc.parsedTarget" from
+		// the initial dial call.
+		// If the server authenticates by IP addresses, we want to set a new endpoint as
+		// a new authority. Otherwise
+		// "transport: authentication handshake failed: x509: certificate is valid for 127.0.0.1, 192.168.121.180, not 192.168.223.156"
+		// when the new dial target is "192.168.121.180" whose certificate host name is also "192.168.121.180"
+		// but client tries to authenticate with previously set "cc.parsedTarget" field "192.168.223.156"
+		authority = target
+	}
 	return tc.gtc.ClientHandshake(ctx, authority, rawConn)
 }
 
