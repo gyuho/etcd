@@ -15,10 +15,73 @@
 package picker
 
 import (
+	"fmt"
+
+	"go.uber.org/zap"
 	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/resolver"
 )
 
 // Picker defines balancer Picker methods.
 type Picker interface {
 	balancer.Picker
+}
+
+// Config defines picker configuration.
+type Config struct {
+	// Policy specifies etcd clientv3's built in balancer policy.
+	Policy Policy
+
+	// Logger defines picker logging object.
+	Logger *zap.Logger
+
+	// SubConnToResolverAddress maps each gRPC sub-connection to an address.
+	// Basically, it is a list of addresses that the Picker can pick from.
+	SubConnToResolverAddress map[balancer.SubConn]resolver.Address
+}
+
+// Policy defines balancer picker policy.
+type Policy uint8
+
+const (
+	// TODO: custom picker is not supported yet.
+	// custom defines custom balancer picker.
+	custom Policy = iota
+
+	// RoundrobinBalanced balance loads over multiple endpoints
+	// and implements failover in roundrobin fashion.
+	RoundrobinBalanced Policy = iota
+
+	// TODO: only send loads to pinned address "RoundrobinFailover"
+	// just like how 3.3 client works
+	//
+	// TODO: prioritize leader
+	// TODO: health-check
+	// TODO: weighted roundrobin
+	// TODO: power of two random choice
+)
+
+func (p Policy) String() string {
+	switch p {
+	case custom:
+		panic("'custom' picker policy is not supported yet")
+	case RoundrobinBalanced:
+		return "etcd-client-roundrobin-balanced"
+	default:
+		panic(fmt.Errorf("invalid balancer picker policy (%d)", p))
+	}
+}
+
+// New creates a new Picker.
+func New(cfg Config) Picker {
+	switch cfg.Policy {
+	case custom:
+		panic("'custom' picker policy is not supported yet")
+
+	case RoundrobinBalanced:
+		return newRoundrobinBalanced(cfg)
+
+	default:
+		panic(fmt.Errorf("invalid balancer picker policy (%d)", cfg.Policy))
+	}
 }
