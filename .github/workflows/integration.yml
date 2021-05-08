@@ -19,5 +19,5 @@ jobs:
         go-version: '^1.16.4'
     - run: go version
     - run: date
-    - name: Run smoke tests
-      run: make test-smoke
+    - name: Run tests
+      run: TEST_OPTS="PASSES='fmt build unit integration_e2e'" make test
