@@ -12,7 +12,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: install git gcc
-    - run: |
+      run: |
         yum install -y git gcc
     - uses: actions/setup-go@v2
       with:
