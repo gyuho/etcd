@@ -107,8 +107,14 @@ func (cs *ClusterServer) MemberPromote(ctx context.Context, r *pb.MemberPromoteR
 	return &pb.MemberPromoteResponse{Header: cs.header(), Members: membersToProtoMembers(membs)}, nil
 }
 
+// header returns the response header for cluster RPCs.
+//
+// leader_id lets a client learn the current raft leader from any v3
+// response. Without it, a client must poll Status on every endpoint to
+// find the leader. 0 means the responding member does not know the leader.
+// See https://github.com/etcd-io/etcd/issues/22268.
 func (cs *ClusterServer) header() *pb.ResponseHeader {
-	return &pb.ResponseHeader{ClusterId: uint64(cs.cluster.ID()), MemberId: uint64(cs.server.MemberID()), RaftTerm: cs.server.Term()}
+	return &pb.ResponseHeader{ClusterId: uint64(cs.cluster.ID()), MemberId: uint64(cs.server.MemberID()), RaftTerm: cs.server.Term(), LeaderId: uint64(cs.server.Leader())}
 }
 
 func membersToProtoMembers(membs []*membership.Member) []*pb.Member {
